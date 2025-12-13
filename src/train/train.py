@@ -46,7 +46,7 @@ def train():
     )
 
     logger = WandbLogger(
-        project="garbage-classification-v5",
+        project="garbage-classification-v6",
         name="simple-cnn-v0",
         config=config,
     )

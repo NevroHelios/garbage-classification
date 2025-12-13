@@ -1,46 +1,72 @@
 from torchvision import transforms
 from torchvision.transforms import Compose
-from albumentations import (
-    Resize, HorizontalFlip, VerticalFlip, RandomRotate90,
-    ShiftScaleRotate, RandomBrightnessContrast, HueSaturationValue,
-    RandomResizedCrop, CoarseDropout, Normalize
-)
+import albumentations as A
 import cv2
+import numpy as np
 from typing import Literal, Optional, Tuple
+
+
+class AlbumentationsTransform:
+    """Wrapper to make Albumentations work with PyTorch DataLoader
+    cause 'You have to pass data to augmentations as named arguments, for example: aug(image=image)'
+    """
+
+    def __init__(self, transform):
+        self.transform = transform
+
+    def __call__(self, img):
+        img = np.array(img)
+        augmented = self.transform(image=img)
+        return augmented["image"]
+
 
 class Transform:
     def __init__(self, img_size):
         self.img_size = img_size
-    
-    def get_transforms(self, mode: Optional[Literal['augment']],
-                       aug_strength:float=1.0
-            ) -> Tuple[Compose, Compose]:
+
+    def get_transforms(
+        self, mode: Optional[Literal["augment"]], aug_strength: float = 1.0
+    ) -> Tuple:
         """returns train & val transforms"""
-        shift_limit = 0.02 * aug_strength
-        scale_limit = 0.1 * aug_strength
-        rotate_limit = int(10 * aug_strength)
-        hue_shift = int(10 * aug_strength)
-        sat_shift = int(10 * aug_strength)
-        val_shift = int(10 * aug_strength)
-        brightness_limit = 0.15 * aug_strength
-        contrast_limit = 0.15 * aug_strength
-        dropout_p = min(0.3 * aug_strength, 1.0)
+
+        mean = (0.485, 0.456, 0.406)
+        std = (0.229, 0.224, 0.225)
 
         train_transform = None
-        val_transform = Compose([
-            transforms.Resize((self.img_size, self.img_size)),
-            transforms.ToTensor(),
-        ])
+        val_transform = A.Compose(
+            [
+                A.Resize(self.img_size, self.img_size),
+                A.Normalize(mean, std),
+                A.ToTensorV2(),
+            ]
+        )
 
-        if mode == 'augment':
-            train_transform = Compose([
-                transforms.Resize((self.img_size, self.img_size)),
-                transforms.RandomHorizontalFlip(),
-                transforms.RandomRotation(15),
-                RandomBrightnessContrast(brightness_limit=brightness_limit, contrast_limit=contrast_limit, p=0.3),
-                Normalize(mean=[0.485,0.456,0.406], std=[0.229,0.224,0.225]),
-                transforms.ToTensor(),
-            ])
+        if mode == "augment":
+            train_transform = A.Compose(
+                [
+                    A.Resize(self.img_size, self.img_size),
+                    A.HorizontalFlip(p=0.5),
+                    A.Rotate(limit=15, p=0.5),
+                    A.ShiftScaleRotate(
+                        shift_limit=0.05,
+                        scale_limit=0.1,
+                        rotate_limit=0,
+                        border_mode=cv2.BORDER_REFLECT_101,
+                        p=0.5,
+                    ),
+                    A.RandomBrightnessContrast(
+                        brightness_limit=0.2, contrast_limit=0.2, p=0.3
+                    ),
+                    A.Normalize(mean=mean, std=std),
+                    A.ToTensorV2(),
+                ]
+            )
 
-        return (train_transform, val_transform) if train_transform else (val_transform, val_transform)
-    
+        train_wrapped = (
+            AlbumentationsTransform(train_transform)
+            if train_transform
+            else AlbumentationsTransform(val_transform)
+        )
+        val_wrapped = AlbumentationsTransform(val_transform)
+
+        return (train_wrapped, val_wrapped)
